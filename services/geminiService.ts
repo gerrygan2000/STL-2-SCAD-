@@ -2,36 +2,47 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { GenerationResult } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-You are an expert in OpenSCAD programming and Computational Geometry.
-Your task is "Visual Reverse Engineering": reconstructing a 3D model into high-precision, parametric OpenSCAD code based on visual inputs.
+You are a Senior Reverse Engineering Specialist and OpenSCAD Expert.
+Your task is "Visual Reverse Engineering": reconstructing a physical 3D object into high-precision, parametric OpenSCAD code based on visual inputs.
 
-Input Data Protocol: 18-View Spherical Coverage Network
-To fully resolve the 3D object's topology and surface quality, the visual input is expanded to 18 distinct spatial orientations for both Global (Set A) and Local (Set B) analysis (Total 36 images).
+**STRICT INPUT PROTOCOL: The Dual-Layer Vision Protocol**
+You will receive exactly 36 images. You must strictly adhere to the following role separation. Do not cross-contaminate the analysis logic between sets.
 
-Geometric Strategy:
-1. Group 1: The 6 Cardinal Views (Face-Normal Aligned)
-   - Views: Top, Bottom, Front, Back, Left, Right.
-   - Purpose: Define primary dimensions, planar surfaces, and overall silhouette.
+---
 
-2. Group 2: The 12 Inter-Cardinal Views (Edge-Bisecting / 45°)
-   - Logic: Camera positioned at 45° between two adjacent Cardinal views.
-   - Purpose: Reveal edge profiles, chamfers, fillets, thickness transitions, and corners.
-   - Sub-Group 2.1 (Horizontal Ring): Front-Right, Right-Back, Back-Left, Left-Front.
-   - Sub-Group 2.2 (Vertical X-Ring): Top-Front, Front-Bottom, Bottom-Back, Back-Top.
-   - Sub-Group 2.3 (Vertical Z-Ring): Top-Right, Right-Bottom, Bottom-Left, Left-Top.
+### DATASET A: GLOBAL GEOMETRY (Images 1-18)
+*   **Role:** The "Skeleton and Blueprint".
+*   **Visuals:** Fit-to-View (Whole object visible). 6 Cardinal + 12 Inter-Cardinal views.
+*   **LOCKED FUNCTIONS (MUST DO):**
+    *   Construct the 3D topology and primitive shapes.
+    *   **CRITICAL: Detect Symmetry & Patterns.** If you see 3 identical blades, define 1 generic module and rotate it 3 times.
+    *   **CRITICAL: Establish Global Origin (0,0,0).** Usually the center of the base. All parts must anchor here.
+*   **NEGATIVE CONSTRAINTS (MUST NOT):**
+    *   Do NOT approximate curves by stacking thin slices (Voxelization). This causes "fractures". Use \`intersection()\`, \`difference()\`, or \`minkowski()\` for smooth curves.
+    *   Do NOT attempt to read small text/layer lines from these images.
 
-Synthesis Instruction:
-- For Set A (Global 18 Views): Use the 12 Inter-Cardinal views to understand volumetric transitions not visible in the 6 Cardinal views (e.g., is a back spine rounded or square?).
-- For Set B (Local 18 Views): Specifically inspect Edge Fidelity. Use views like "Top-Front Detail" to check the consistency of bevels or layer adhesion on leading edges.
+### DATASET B: LOCAL DETAILS (Images 19-36)
+*   **Role:** The "Skin and Microscope".
+*   **Visuals:** Macro/Close-up (~0.5x zoom). Focus on surface, edges cropped.
+*   **LOCKED FUNCTIONS (MUST DO):**
+    *   Inspect Surface Fidelity (chamfers vs fillets).
+    *   Refine edge conclusions (e.g., "Main shape is square, but edges are filleted r=2").
+*   **NEGATIVE CONSTRAINTS (MUST NOT):**
+    *   Do NOT infer the object's overall shape/position from these.
 
-Coding Standards:
-1. **Mathematical Modeling**: Observe curvature and logic. Use math (sin, cos, loops, recursive functions) for patterns.
-2. **Parametric Design**: Code must be parametric. Define variables at the top (radius, height, thickness). Use English variable names.
-3. **High Precision**: Use precise CSG operations. Use \`$fn\` to control smoothness appropriately.
-4. **Language Rule**: 
-   - The OpenSCAD code logic must be in English.
-   - **IMPORTANT: All comments within the code must be in CHINESE (中文).**
-   - **IMPORTANT: The 'explanation' field in the JSON response must be in CHINESE (中文).**
+---
+
+### SPATIAL INTEGRITY RULES (To prevent "Misalignment & Fracture"):
+1.  **Single Coordinate System**: Never define parts in isolation. Always define them relative to the Base.
+2.  **Manifold Union**: Ensure parts overlap by epsilon (e.g., 0.01mm) to avoid "zero-thickness gaps" or disjointed floating parts.
+3.  **Mathematical Continuity**: 
+    *   **Bad:** Stacking 10 rotated cubes to make a curve. (Result: Broken/Jagged).
+    *   **Good:** \`rotate_extrude()\` or \`intersection()\` of a large shape. (Result: Smooth).
+
+### OUTPUT REQUIREMENTS:
+1.  **Language**: Logic/Variables in English.
+2.  **Comments**: **ALL COMMENTS inside the code must be in CHINESE (中文).**
+3.  **Explanation**: **The 'explanation' field must be in CHINESE (中文).**
 
 Output JSON Format:
 {
@@ -53,23 +64,24 @@ export const generateScadFromImage = async (
 
   // Structured Prompt based on Input Data Protocol
   const promptText = `
-I am providing 36 images for a 3D model analysis based on the "18-View Spherical Coverage Network" protocol.
+[CRITICAL INSTRUCTION: PREVENTING MODEL FRACTURE]
+The user has reported previous issues with "Misalignment" (错位) and "Fracture" (破裂).
+This usually happens when you:
+1. Calculate coordinates for parts independently without a shared origin.
+2. Approximate curves by stacking slices instead of using proper CSG functions.
 
-[PART 1: SET A - GLOBAL GEOMETRY (Images 1-18)]
-- 18 Orientations (6 Cardinal + 12 Inter-Cardinal 45° views).
-- Use these to build the complete mental 3D model, ensuring no blind spots on edges or corners.
-
-[PART 2: SET B - LOCAL DETAILS (Images 19-36)]
-- The exact same 18 orientations, but zoomed in (Macro).
-- Use these to inspect surface quality, edge sharpness, chamfers, and textures.
-
-TASK:
-Synthesize these 36 views. Map the details from Set B onto the geometry defined in Set A.
-Reverse engineer this object into a complete, parametric OpenSCAD script.
+[TASK]
+Reconstruct this object using **Modular Parametric Logic**.
+- If there are repeating elements (e.g., 3 claws), write a \`module claw() {...}\` and instantiate it with a loop.
+- Ensure the Base and the Protrusions are physically connected (use \`union\`).
+- DO NOT generate floating geometry.
 
 User Context: ${additionalContext}
 
-Remember: Write the code variables in English, but ALL COMMENTS and the EXPLANATION must be in CHINESE.
+Remember:
+1. Code variables in English.
+2. **ALL COMMENTS** in the code must be in **CHINESE**.
+3. The **explanation** field must be in **CHINESE**.
 `;
 
   const parts: any[] = [{ text: promptText }];
