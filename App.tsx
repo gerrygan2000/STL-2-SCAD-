@@ -5,15 +5,17 @@ import CodeEditor from './components/CodeEditor';
 import { generateScadFromImage } from './services/geminiService';
 import { AppState, GeometryData, GenerationResult } from './types';
 
-// Labels corresponding to the capture order in StlScene.tsx
-// Order: Top, Front, Right, Back, Left, Bottom
+// Generate labels for 18 orientations * 2 Sets = 36 Views
+const ORIENTATIONS = [
+  "Top", "Bottom", "Front", "Back", "Left", "Right", // Cardinal
+  "Front-Right", "Right-Back", "Back-Left", "Left-Front", // Horizontal
+  "Top-Front", "Front-Bottom", "Bottom-Back", "Back-Top", // Vertical X
+  "Top-Right", "Right-Bottom", "Bottom-Left", "Left-Top"  // Vertical Z
+];
+
 const VIEW_LABELS = [
-  "俯视 (Top)", 
-  "前视 (Front)", 
-  "右视 (Right)", 
-  "后视 (Back)", 
-  "左视 (Left)", 
-  "仰视 (Bottom)"
+  ...ORIENTATIONS.map(name => `${name} (Global)`),
+  ...ORIENTATIONS.map(name => `${name} (Local Detail)`)
 ];
 
 // Helper function to resize and compress image
@@ -117,15 +119,15 @@ const App: React.FC = () => {
     setSnapshots([]); // Clear previous snapshots
 
     try {
-      // 1. Capture Multi-View Snapshots
-      setProgressText("正在自动切换视角并采集图像...");
+      // 1. Capture Multi-View Snapshots (36 views)
+      setProgressText("正在进行全方位球形覆盖采集 (36 视角)...");
       const rawSnapshots = await captureSnapshotRef.current();
       
       // Update state to show the grid view immediately
       setSnapshots(rawSnapshots);
       
       // 2. Optimize all images
-      setProgressText(`正在优化 ${rawSnapshots.length} 张多视角图像...`);
+      setProgressText(`正在优化 ${rawSnapshots.length} 张高维图像数据...`);
       const optimizedSnapshotsProms = rawSnapshots.map(snap => optimizeImage(snap));
       const optimizedSnapshots = await Promise.all(optimizedSnapshotsProms);
 
@@ -133,8 +135,11 @@ const App: React.FC = () => {
       const base64Images = optimizedSnapshots.map(s => s.split(',')[1]);
 
       // 4. Send to Gemini
-      setProgressText("Gemini 3 Pro 正在综合分析 6 个维度的几何特征...");
-      const response = await generateScadFromImage(base64Images, `原始文件名: ${geometry.filename}`);
+      setProgressText("Gemini 3 Pro 正在构建拓扑网络并推导 OpenSCAD 代码...");
+      const response = await generateScadFromImage(
+        base64Images, 
+        `原始文件名: ${geometry.filename}。Input Protocol: 18-View Spherical Coverage Network (Total 36 images: 18 Global, 18 Local).`
+      );
       
       setResult(response);
       setAppState(AppState.COMPLETE);
@@ -157,7 +162,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="font-bold text-lg tracking-tight text-white">STL 转 OpenSCAD 智能重构</h1>
-              <p className="text-xs text-slate-400">Gemini 3 Pro 多视角逆向工程</p>
+              <p className="text-xs text-slate-400">Gemini 3 Pro 球形覆盖逆向工程</p>
             </div>
           </div>
           
@@ -190,7 +195,7 @@ const App: React.FC = () => {
             {/* 
                 Render Logic:
                 1. If Loading STL -> Show Spinner
-                2. If Analyzing AND we have snapshots -> Show 2x3 Grid
+                2. If Analyzing AND we have snapshots -> Show 4xGrid (36 images)
                 3. If Geometry exists -> Show 3D Scene
                 4. Else -> Show Upload Prompt
             */}
@@ -201,13 +206,13 @@ const App: React.FC = () => {
                     <p className="text-indigo-300 font-medium">正在读取 STL 文件...</p>
                 </div>
             ) : (appState === AppState.ANALYZING || appState === AppState.COMPLETE) && snapshots.length > 0 ? (
-                /* Static Grid View during Analysis */
-                <div className="w-full h-full p-2 relative">
-                   <div className="grid grid-cols-3 grid-rows-2 gap-2 h-full">
+                /* Static Grid View during Analysis - 4 columns for 36 images */
+                <div className="w-full h-full p-2 relative overflow-y-auto custom-scrollbar">
+                   <div className="grid grid-cols-4 gap-1.5 pb-2">
                       {snapshots.map((src, idx) => (
-                        <div key={idx} className="relative rounded bg-slate-800 border border-slate-700 overflow-hidden group">
-                           <img src={src} alt={VIEW_LABELS[idx]} className="w-full h-full object-contain p-1" />
-                           <div className="absolute top-0 left-0 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2 py-1 rounded-br">
+                        <div key={idx} className="relative rounded bg-slate-800 border border-slate-700 overflow-hidden group aspect-square">
+                           <img src={src} alt={VIEW_LABELS[idx]} className="w-full h-full object-contain p-0.5" />
+                           <div className="absolute top-0 left-0 w-full bg-black/60 backdrop-blur-[1px] text-white text-[8px] px-1 py-0.5 font-mono opacity-0 group-hover:opacity-100 transition-opacity truncate">
                              {VIEW_LABELS[idx]}
                            </div>
                         </div>
@@ -216,7 +221,7 @@ const App: React.FC = () => {
                    
                    {/* Loading Overlay (only if still analyzing) */}
                    {appState === AppState.ANALYZING && (
-                     <div className="absolute inset-0 z-20 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center">
+                     <div className="absolute inset-0 z-20 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center h-full">
                         <div className="bg-slate-900/90 p-6 rounded-xl border border-indigo-500/30 shadow-2xl flex flex-col items-center">
                             <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                             <p className="text-indigo-400 font-mono text-sm animate-pulse">{progressText}</p>
@@ -251,7 +256,7 @@ const App: React.FC = () => {
                   `}
                 >
                   <Eye size={18} />
-                  <span>{result ? '重新分析' : '全视角重构'}</span>
+                  <span>{result ? '重新分析' : '36 视角球形重构'}</span>
                 </button>
               </div>
             )}

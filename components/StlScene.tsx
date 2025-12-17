@@ -100,7 +100,7 @@ const ScreenshotHandler: React.FC<{ onSnapshotReady: (fn: () => Promise<string[]
         }
       });
 
-      // Fallback if named mesh not found (shouldn't happen with current setup)
+      // Fallback if named mesh not found
       if (!targetMesh) {
          scene.traverse((child) => {
            if (child instanceof THREE.Mesh) targetMesh = child;
@@ -108,7 +108,7 @@ const ScreenshotHandler: React.FC<{ onSnapshotReady: (fn: () => Promise<string[]
       }
 
       const center = new THREE.Vector3(0,0,0);
-      let dist = 100;
+      let fitDistance = 100;
 
       if (targetMesh) {
         // Calculate Bounding Box from the object in World Space
@@ -116,16 +116,19 @@ const ScreenshotHandler: React.FC<{ onSnapshotReady: (fn: () => Promise<string[]
         box.getCenter(center); // Update center vector
         const size = box.getSize(new THREE.Vector3());
 
-        // --- 2. Calculate Fit-to-View Distance ---
+        // --- 2. Calculate Fit-to-View Base Distance ---
         // Formula: distance = (maxDim / 2) / tan(FOV / 2)
         const maxDim = Math.max(size.x, size.y, size.z);
         const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
         
-        const cameraDist = Math.abs((maxDim / 2) / Math.tan(fov / 2));
-        
-        // Add padding (1.5x) to ensure the object has breathing room and doesn't touch edges
-        dist = cameraDist * 1.5;
+        // The distance where the object fits exactly in the view
+        const exactFitDist = Math.abs((maxDim / 2) / Math.tan(fov / 2));
+        fitDistance = exactFitDist;
       }
+
+      // Distances for different modes
+      const standardDist = fitDistance * 1.6; // Standard View (1.6x margin for global context)
+      const macroDist = fitDistance * 0.55;   // Macro View (0.55x zoom factor for edge inspection)
 
       // Save original state
       const originalPosition = camera.position.clone();
@@ -134,63 +137,58 @@ const ScreenshotHandler: React.FC<{ onSnapshotReady: (fn: () => Promise<string[]
       
       const snapshots: string[] = [];
 
-      // --- 3. Define 6 Standard Views relative to Center ---
-      // Order strictly matches: Top, Front, Right, Back, Left, Bottom
-      const views = [
-        // 1. Top View (俯视)
-        // Pos: Above (+Y), looking down at center.
-        // Up: Points to Back (-Z). Standard map orientation.
-        { 
-          name: 'Top', 
-          offset: new THREE.Vector3(0, dist, 0), 
-          up: new THREE.Vector3(0, 0, -1) 
-        },
-        
-        // 2. Front View (前视)
-        // Pos: In front (+Z), looking at center.
-        // Up: Standard (+Y).
-        { 
-          name: 'Front', 
-          offset: new THREE.Vector3(0, 0, dist), 
-          up: new THREE.Vector3(0, 1, 0) 
-        },
-        
-        // 3. Right View (右视)
-        // Pos: Right (+X), looking at center.
-        // Up: Standard (+Y).
-        { 
-          name: 'Right', 
-          offset: new THREE.Vector3(dist, 0, 0), 
-          up: new THREE.Vector3(0, 1, 0) 
-        },
+      // --- 3. Define 18 Spherical Orientations ---
+      // We normalize vectors later
+      const baseOrientations = [
+        // Group 1: The 6 Cardinal Views (Face-Normal)
+        { name: 'Top',    vec: [0, 1, 0],  up: [0, 0, -1] },
+        { name: 'Bottom', vec: [0, -1, 0], up: [0, 0, 1] },
+        { name: 'Front',  vec: [0, 0, 1],  up: [0, 1, 0] },
+        { name: 'Back',   vec: [0, 0, -1], up: [0, 1, 0] },
+        { name: 'Left',   vec: [-1, 0, 0], up: [0, 1, 0] },
+        { name: 'Right',  vec: [1, 0, 0],  up: [0, 1, 0] },
 
-        // 4. Back View (后视)
-        // Pos: Behind (-Z), looking at center.
-        // Up: Standard (+Y).
-        { 
-          name: 'Back', 
-          offset: new THREE.Vector3(0, 0, -dist), 
-          up: new THREE.Vector3(0, 1, 0) 
-        },
+        // Group 2.1: Horizontal Ring (Y-Ring) - 45 degrees
+        { name: 'Front-Right', vec: [1, 0, 1],   up: [0, 1, 0] },
+        { name: 'Right-Back',  vec: [1, 0, -1],  up: [0, 1, 0] },
+        { name: 'Back-Left',   vec: [-1, 0, -1], up: [0, 1, 0] },
+        { name: 'Left-Front',  vec: [-1, 0, 1],  up: [0, 1, 0] },
 
-        // 5. Left View (左视)
-        // Pos: Left (-X), looking at center.
-        // Up: Standard (+Y).
-        { 
-          name: 'Left', 
-          offset: new THREE.Vector3(-dist, 0, 0), 
-          up: new THREE.Vector3(0, 1, 0) 
-        },
+        // Group 2.2: Vertical X-Ring - 45 degrees
+        { name: 'Top-Front',    vec: [0, 1, 1],   up: [0, 1, 0] },
+        { name: 'Front-Bottom', vec: [0, -1, 1],  up: [0, 1, 0] },
+        { name: 'Bottom-Back',  vec: [0, -1, -1], up: [0, 1, 0] },
+        { name: 'Back-Top',     vec: [0, 1, -1],  up: [0, 1, 0] },
 
-        // 6. Bottom View (仰视)
-        // Pos: Below (-Y), looking up at center.
-        // Up: Points to Front (+Z). Keeps orientation intuitive.
-        { 
-          name: 'Bottom', 
-          offset: new THREE.Vector3(0, -dist, 0), 
-          up: new THREE.Vector3(0, 0, 1) 
-        },
+        // Group 2.3: Vertical Z-Ring - 45 degrees
+        { name: 'Top-Right',    vec: [1, 1, 0],   up: [0, 1, 0] },
+        { name: 'Right-Bottom', vec: [1, -1, 0],  up: [0, 1, 0] },
+        { name: 'Bottom-Left',  vec: [-1, -1, 0], up: [0, 1, 0] },
+        { name: 'Left-Top',     vec: [-1, 1, 0],  up: [0, 1, 0] },
       ];
+
+      // --- 4. Generate 36 Views (18 Global + 18 Local) ---
+      const views = [];
+
+      // Set A: Global 18 Views
+      baseOrientations.forEach(o => {
+        const dir = new THREE.Vector3(o.vec[0], o.vec[1], o.vec[2]).normalize();
+        views.push({
+          name: o.name,
+          offset: dir.multiplyScalar(standardDist),
+          up: new THREE.Vector3(o.up[0], o.up[1], o.up[2])
+        });
+      });
+
+      // Set B: Local 18 Views
+      baseOrientations.forEach(o => {
+        const dir = new THREE.Vector3(o.vec[0], o.vec[1], o.vec[2]).normalize();
+        views.push({
+          name: `${o.name} Detail`,
+          offset: dir.multiplyScalar(macroDist),
+          up: new THREE.Vector3(o.up[0], o.up[1], o.up[2])
+        });
+      });
 
       // Temporarily disable controls
       if (controlsRef.current) {
@@ -212,12 +210,12 @@ const ScreenshotHandler: React.FC<{ onSnapshotReady: (fn: () => Promise<string[]
           camera.updateProjectionMatrix(); 
           
           // Wait for renderer
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 80)); // Slightly faster capture per frame
           
           // Explicit render
           gl.render(scene, camera);
           
-          const dataUrl = gl.domElement.toDataURL('image/jpeg', 0.95);
+          const dataUrl = gl.domElement.toDataURL('image/jpeg', 0.90);
           snapshots.push(dataUrl);
         }
       } finally {

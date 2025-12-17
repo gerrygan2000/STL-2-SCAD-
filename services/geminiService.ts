@@ -2,38 +2,41 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { GenerationResult } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-你是一位精通 OpenSCAD 编程和计算几何的机械工程专家。
-你的任务是进行“视觉逆向工程”，将输入的 3D 模型图像（包含多个工程视角）重构为高精度的 OpenSCAD 代码。
+You are an expert in OpenSCAD programming and Computational Geometry.
+Your task is "Visual Reverse Engineering": reconstructing a 3D model into high-precision, parametric OpenSCAD code based on visual inputs.
 
-核心要求：
-1. **多视角综合分析**：
-   - 你将收到 6 张图片，分别代表：俯视 (Top)、前视 (Front)、右视 (Right)、后视 (Back)、左视 (Left)、仰视 (Bottom)。
-   - **务必综合所有视角**：例如，通过俯视图确定底面轮廓，通过侧视图确定拉伸高度和孔洞位置。
-   - 就像绘图员根据三视图还原物体一样，在脑海中重建 3D 结构。
+Input Data Protocol: 18-View Spherical Coverage Network
+To fully resolve the 3D object's topology and surface quality, the visual input is expanded to 18 distinct spatial orientations for both Global (Set A) and Local (Set B) analysis (Total 36 images).
 
-2. **数学建模 (Mathematical Modeling)**：
-   - 仔细观察形状的曲率和变化规律。如果形状包含曲线、螺旋或重复图案，必须使用数学公式（如 sin, cos, pow）、for 循环或递归生成，而不是简单的堆叠。
-   - 寻找几何原本的逻辑（例如：这个曲线是否符合贝塞尔曲线？这个孔是否按圆周分布？）。
+Geometric Strategy:
+1. Group 1: The 6 Cardinal Views (Face-Normal Aligned)
+   - Views: Top, Bottom, Front, Back, Left, Right.
+   - Purpose: Define primary dimensions, planar surfaces, and overall silhouette.
 
-3. **参数化 (Parametric Design)**：
-   - 代码必须完全参数化。在文件顶部定义关键尺寸变量（如 radius, height, thickness, num_segments）。
-   - **变量名保持英文，但必须在旁边用中文注释说明其含义**。
-   - 代码中的数字应尽量由这些变量推导得出。
+2. Group 2: The 12 Inter-Cardinal Views (Edge-Bisecting / 45°)
+   - Logic: Camera positioned at 45° between two adjacent Cardinal views.
+   - Purpose: Reveal edge profiles, chamfers, fillets, thickness transitions, and corners.
+   - Sub-Group 2.1 (Horizontal Ring): Front-Right, Right-Back, Back-Left, Left-Front.
+   - Sub-Group 2.2 (Vertical X-Ring): Top-Front, Front-Bottom, Bottom-Back, Back-Top.
+   - Sub-Group 2.3 (Vertical Z-Ring): Top-Right, Right-Bottom, Bottom-Left, Left-Top.
 
-4. **高精度与细节 (High Precision)**：
-   - 视觉估算比例要非常仔细。
-   - 使用高级 CSG 操作（hull, minkowski, intersection）来处理过渡和圆角。
-   - 使用 $fn 变量控制平滑度（例如 $fn=100）。
+Synthesis Instruction:
+- For Set A (Global 18 Views): Use the 12 Inter-Cardinal views to understand volumetric transitions not visible in the 6 Cardinal views (e.g., is a back spine rounded or square?).
+- For Set B (Local 18 Views): Specifically inspect Edge Fidelity. Use views like "Top-Front Detail" to check the consistency of bevels or layer adhesion on leading edges.
 
-5. **中文输出 (Chinese Output)**：
-   - **生成的 OpenSCAD 代码中，所有注释必须完全使用中文**。
-   - **explanation** 字段必须使用**中文**解释你的建模思路，特别是你是如何结合不同视角推导结构的。
-   - 不要生成 polyhedron() 或巨大的坐标点阵列。
+Coding Standards:
+1. **Mathematical Modeling**: Observe curvature and logic. Use math (sin, cos, loops, recursive functions) for patterns.
+2. **Parametric Design**: Code must be parametric. Define variables at the top (radius, height, thickness). Use English variable names.
+3. **High Precision**: Use precise CSG operations. Use \`$fn\` to control smoothness appropriately.
+4. **Language Rule**: 
+   - The OpenSCAD code logic must be in English.
+   - **IMPORTANT: All comments within the code must be in CHINESE (中文).**
+   - **IMPORTANT: The 'explanation' field in the JSON response must be in CHINESE (中文).**
 
 Output JSON Format:
 {
-  "code": "The OpenSCAD script with Chinese comments",
-  "explanation": "Reconstruction logic in Chinese"
+  "code": "The OpenSCAD script...",
+  "explanation": "Reconstruction logic in Chinese..."
 }
 `;
 
@@ -48,12 +51,28 @@ export const generateScadFromImage = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // Construct parts: prompt text + 6 images
-  const parts: any[] = [
-    {
-      text: `请根据提供的 6 张工程视角截图（顺序：俯视、前视、右视、后视、左视、仰视）重构 OpenSCAD 代码。请综合分析这些视角，利用数学公式精准描述形状。务必确保代码内的所有注释和参数说明都使用中文。 ${additionalContext ? `用户上下文: ${additionalContext}` : ''}`
-    }
-  ];
+  // Structured Prompt based on Input Data Protocol
+  const promptText = `
+I am providing 36 images for a 3D model analysis based on the "18-View Spherical Coverage Network" protocol.
+
+[PART 1: SET A - GLOBAL GEOMETRY (Images 1-18)]
+- 18 Orientations (6 Cardinal + 12 Inter-Cardinal 45° views).
+- Use these to build the complete mental 3D model, ensuring no blind spots on edges or corners.
+
+[PART 2: SET B - LOCAL DETAILS (Images 19-36)]
+- The exact same 18 orientations, but zoomed in (Macro).
+- Use these to inspect surface quality, edge sharpness, chamfers, and textures.
+
+TASK:
+Synthesize these 36 views. Map the details from Set B onto the geometry defined in Set A.
+Reverse engineer this object into a complete, parametric OpenSCAD script.
+
+User Context: ${additionalContext}
+
+Remember: Write the code variables in English, but ALL COMMENTS and the EXPLANATION must be in CHINESE.
+`;
+
+  const parts: any[] = [{ text: promptText }];
 
   // Add all images to the request
   imagesBase64.forEach((imgData) => {
