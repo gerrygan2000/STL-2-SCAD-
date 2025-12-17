@@ -1,0 +1,5 @@
+{
+  "name": "STL 2 SCAD生成器",
+  "description": "Uses Computer Vision and Gemini 2.5 to reverse-engineer STL meshes into clean, parametric OpenSCAD code.",
+  "requestFramePermissions": []
+}
