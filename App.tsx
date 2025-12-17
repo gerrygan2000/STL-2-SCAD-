@@ -5,7 +5,7 @@ import CodeEditor from './components/CodeEditor';
 import { generateScadFromImage } from './services/geminiService';
 import { AppState, GeometryData, GenerationResult } from './types';
 
-// Generate labels for 18 orientations * 2 Sets = 36 Views
+// Generate labels for 18 orientations (Global Only)
 const ORIENTATIONS = [
   "Top", "Bottom", "Front", "Back", "Left", "Right", // Cardinal
   "Front-Right", "Right-Back", "Back-Left", "Left-Front", // Horizontal
@@ -13,10 +13,7 @@ const ORIENTATIONS = [
   "Top-Right", "Right-Bottom", "Bottom-Left", "Left-Top"  // Vertical Z
 ];
 
-const VIEW_LABELS = [
-  ...ORIENTATIONS.map(name => `${name} (Global)`),
-  ...ORIENTATIONS.map(name => `${name} (Local Detail)`)
-];
+const VIEW_LABELS = ORIENTATIONS.map(name => `${name} (Global)`);
 
 // Helper function to resize and compress image
 const optimizeImage = (dataUrl: string): Promise<string> => {
@@ -119,15 +116,15 @@ const App: React.FC = () => {
     setSnapshots([]); // Clear previous snapshots
 
     try {
-      // 1. Capture Multi-View Snapshots (36 views)
-      setProgressText("正在进行全方位球形覆盖采集 (36 视角)...");
+      // 1. Capture Multi-View Snapshots (18 views)
+      setProgressText("正在进行全方位几何覆盖采集 (18 视角)...");
       const rawSnapshots = await captureSnapshotRef.current();
       
       // Update state to show the grid view immediately
       setSnapshots(rawSnapshots);
       
       // 2. Optimize all images
-      setProgressText(`正在优化 ${rawSnapshots.length} 张高维图像数据...`);
+      setProgressText(`正在优化 ${rawSnapshots.length} 张全景几何图像...`);
       const optimizedSnapshotsProms = rawSnapshots.map(snap => optimizeImage(snap));
       const optimizedSnapshots = await Promise.all(optimizedSnapshotsProms);
 
@@ -135,10 +132,10 @@ const App: React.FC = () => {
       const base64Images = optimizedSnapshots.map(s => s.split(',')[1]);
 
       // 4. Send to Gemini
-      setProgressText("Gemini 3 Pro 正在构建拓扑网络并推导 OpenSCAD 代码...");
+      setProgressText("Gemini 3 Pro 正在执行单层几何拓扑分析...");
       const response = await generateScadFromImage(
         base64Images, 
-        `原始文件名: ${geometry.filename}。Input Protocol: 18-View Spherical Coverage Network (Total 36 images: 18 Global, 18 Local).`
+        `原始文件名: ${geometry.filename}。Protocol: Single-Dataset Geometric Reconstruction (18 Global Views). Focus: Topology & Volumetric Resolution.`
       );
       
       setResult(response);
@@ -162,7 +159,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="font-bold text-lg tracking-tight text-white">STL 转 OpenSCAD 智能重构</h1>
-              <p className="text-xs text-slate-400">Gemini 3 Pro 球形覆盖逆向工程</p>
+              <p className="text-xs text-slate-400">Gemini 3 Pro 全方位几何分析</p>
             </div>
           </div>
           
@@ -195,7 +192,7 @@ const App: React.FC = () => {
             {/* 
                 Render Logic:
                 1. If Loading STL -> Show Spinner
-                2. If Analyzing AND we have snapshots -> Show 4xGrid (36 images)
+                2. If Analyzing AND we have snapshots -> Show 6x3 Grid (18 images)
                 3. If Geometry exists -> Show 3D Scene
                 4. Else -> Show Upload Prompt
             */}
@@ -206,9 +203,9 @@ const App: React.FC = () => {
                     <p className="text-indigo-300 font-medium">正在读取 STL 文件...</p>
                 </div>
             ) : (appState === AppState.ANALYZING || appState === AppState.COMPLETE) && snapshots.length > 0 ? (
-                /* Static Grid View during Analysis - 4 columns for 36 images */
+                /* Static Grid View during Analysis - 6 columns for 18 images */
                 <div className="w-full h-full p-2 relative overflow-y-auto custom-scrollbar">
-                   <div className="grid grid-cols-4 gap-1.5 pb-2">
+                   <div className="grid grid-cols-6 gap-1.5 pb-2">
                       {snapshots.map((src, idx) => (
                         <div key={idx} className="relative rounded bg-slate-800 border border-slate-700 overflow-hidden group aspect-square">
                            <img src={src} alt={VIEW_LABELS[idx]} className="w-full h-full object-contain p-0.5" />
@@ -256,7 +253,7 @@ const App: React.FC = () => {
                   `}
                 >
                   <Eye size={18} />
-                  <span>{result ? '重新分析' : '36 视角球形重构'}</span>
+                  <span>{result ? '重新分析' : '18 视角球形重构'}</span>
                 </button>
               </div>
             )}
